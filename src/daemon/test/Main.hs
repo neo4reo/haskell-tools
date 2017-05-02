@@ -26,6 +26,7 @@ import SrcLoc
 import FastString
 
 import Language.Haskell.Tools.Refactor.Daemon
+import Language.Haskell.Tools.Refactor.Daemon.Representation
 import Language.Haskell.Tools.Refactor.Daemon.PackageDB
 
 pORT_NUM_START = 4100

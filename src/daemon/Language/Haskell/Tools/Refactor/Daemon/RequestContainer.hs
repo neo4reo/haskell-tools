@@ -66,29 +66,28 @@ import Debug.Trace
 
 data RequestContainer
   = RequestContainer { content :: MVar ([ClientMessage],[FilePath])
-                     , content_lock :: MVar ()
+                     , content_flag :: MVar ()
                      }
 mkRequestContainer :: IO RequestContainer
-mkRequestContainer = RequestContainer <$> newEmptyMVar <*> (newMVar ())
+mkRequestContainer = RequestContainer <$> newMVar ([],[]) <*> newEmptyMVar
 
 getRequests :: RequestContainer -> IO ([ClientMessage],[FilePath])
 getRequests (RequestContainer {..}) = do
-    takeMVar content_lock
-    c <- takeMVar content
-    putMVar content_lock ()
-    return c
+    putStrLn "getRequests take lock"
+    takeMVar content_flag
+    putStrLn "getRequests take content"
+    modifyMVarMasked content $ \(cml,fs) -> return (([],[]), (cml,fs))
 
 putRequest :: RequestContainer -> ClientMessage -> IO ()
 putRequest (RequestContainer {..}) cm = do
-    takeMVar content_lock
-    b <- tryPutMVar content ([cm],[])
-    if b then return () else modifyMVarMasked_ content $ \ (cml, fs) -> return (cml++[cm], fs)
-    putMVar content_lock ()
+    putStrLn "putRequest put content"
+    modifyMVarMasked_ content $ \ (cml, fs) -> do
+      when (null cml && null fs) $ putMVar content_flag ()
+      return (cml++[cm], fs)
 
 putChangedFiles :: RequestContainer -> [FilePath] -> IO ()
 putChangedFiles (RequestContainer {..}) fs = do
-    takeMVar content_lock
-    b <- tryPutMVar content ([],fs)
-    if b then return () else modifyMVarMasked_ content $ \ (cml, fsl) -> return (cml, fsl ++ fs)
-    putMVar content_lock ()
-
+  putStrLn "putChangedFiles put content"
+  modifyMVarMasked_ content $ \ (cml, fsl) -> do
+    when (null cml && null fsl) $ putMVar content_flag ()
+    return (cml, fsl ++ fs)

@@ -125,7 +125,8 @@ handleClientMessage _ resp (ReLoad changed removed) =
                                 Right _ -> return ()
      return True
 
-handleClientMessage _ _ Stop = modify (exiting .= True) >> return False
+handleClientMessage _ _ Stop = do liftIO $ putStrLn "STOP"
+                                  modify (exiting .= True) >> return False
 
 handleClientMessage _ resp (PerformRefactoring refact modPath selection args) = do
     (Just actualMod, otherMods) <- getFileMods modPath
@@ -178,6 +179,3 @@ handleClientMessage _ resp (PerformRefactoring refact modPath selection args) = 
                                                  (\ms -> modSumName ms `elem` changedMods)
                liftIO $ case reloadRes of Left errs -> resp (either ErrorMessage (ErrorMessage . ("The result of the refactoring contains errors: " ++) . show) (getProblems errs))
                                           Right _ -> return ()
-
-
-

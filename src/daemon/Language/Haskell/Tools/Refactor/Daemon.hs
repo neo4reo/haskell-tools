@@ -86,12 +86,13 @@ runDaemon args = withSocketsDo $
        when (not isSilent) $ putStrLn $ "Listening on port " ++ finalArgs !! 0
        bind sock (SockAddrInet (read (finalArgs !! 0)) iNADDR_ANY)
        listen sock 1
-       clientLoop isSilent sock
+       si <- clientLoop isSilent sock
+       shutdownSystem si
 
 defaultArgs :: [String]
 defaultArgs = ["4123", "True"]
 
-clientLoop :: Bool -> Socket -> IO ()
+clientLoop :: Bool -> Socket -> IO SystemInterface
 clientLoop isSilent sock
   = do when (not isSilent) $ putStrLn $ "Starting client loop"
        (conn,_) <- accept sock
@@ -100,7 +101,8 @@ clientLoop isSilent sock
        si <- buildSystem handleClientMessage ghcSess state SafeRefactoringProtocol conn
        sessionData <- readMVar state
        when (not (sessionData ^. exiting))
-         $ clientLoop isSilent sock
+         $ void $ clientLoop isSilent sock
+       return si
 
 -- serverLoop :: Bool -> Session -> MVar DaemonSessionState -> Socket -> IO ()
 -- serverLoop isSilent ghcSess state sock =
@@ -127,5 +129,3 @@ clientLoop isSilent sock
 --       Nothing -> do next $ encode $ ErrorMessage $ "MALFORMED MESSAGE: " ++ unpack mess
 --                     return True
 --       Just req -> modifyMVar state (\st -> swap <$> reflectGhc (runStateT (updateClient (next . encode) req) st) ghcSess)
-
-

@@ -156,7 +156,9 @@ spawnMerge si sres = do
     finishMVar <- newMVar False
     rc <- mkRequestContainer
     tid <- forkIO $ forever $ do
+            putStrLn "before getRequests"
             (cls,fps) <- getRequests rc
+            putStrLn $ "after getRequests: " ++ show cls
             let sendMsg  = putMVar reqMsgMVar
                 dropMVar = (>> return ()) . takeMVar
                 loopWhenNotFinished :: IO () -> IO ()
@@ -198,8 +200,10 @@ spawnWork clh ghcSess daemonState merge fs = do
     tid <- forkIO $ forever $ do
         msg <- (merge ^. request)
         exiting <- modifyMVar daemonState (\st -> swap <$> reflectGhc (runStateT (clh fs (merge ^. response) msg) st) ghcSess)
+        putStrLn $ "client message handled, continue: " ++ show exiting
         modifyMVarMasked_ exitingMVar (\ _ -> return exiting)
         merge ^. workFinish
+        putStrLn $ "work cycle done"
     return WorkInterface { _shutdownWork = killThread tid
                          , _exitingFlag = readMVar exitingMVar
                          }
@@ -218,3 +222,12 @@ buildSystem clh session daemonState prot sock = do
       _endSocketConnectionNotify = si ^. endSocketConnectionNotify
   return SystemInterface {..}
 
+
+shutdownSystem :: SystemInterface -> IO ()
+shutdownSystem (InitSystem {}) = error "shutdownSystem on InitSystem"
+shutdownSystem si = do putStrLn "shutdownSystem"
+                       void $ forkIO $ do fromJust $ si ^? (sreqI & shutdownSReq)
+                                          fromJust $ si ^? (sresI & shutdownSRes)
+                                          fromJust $ si ^? (fsI & shutdownFS)
+                                          fromJust $ si ^? (mergeI & shutdownMerge)
+                                          fromJust $ si ^? (workI & shutdownWork)
