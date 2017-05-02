@@ -74,6 +74,11 @@ library
   exposed-modules:     Language.Haskell.Tools.Refactor.Daemon
                      , Language.Haskell.Tools.Refactor.Daemon.State
                      , Language.Haskell.Tools.Refactor.Daemon.PackageDB
+                     , Language.Haskell.Tools.Refactor.Daemon.Representation
+                     , Language.Haskell.Tools.Refactor.Daemon.DaemonThreads
+                     , Language.Haskell.Tools.Refactor.Daemon.RequestContainer
+                     , Language.Haskell.Tools.Refactor.Daemon.HandleClientMessage
+                     , Language.Haskell.Tools.Refactor.Daemon.Utils
   default-language:    Haskell2010
 
 
