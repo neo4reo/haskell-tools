@@ -114,6 +114,48 @@ data UndoRefactor = RemoveAdded { undoRemovePath :: FilePath }
 
 
 
+data LogLevel
+  = DebugLogLevel
+  | InfoLogLevel
+  | WanLogLevel
+  | ErrorLogLevel
+  | CriticalLogLevel
+  deriving (Show, Generic)
+
+instance ToJSON LogLevel
+instance FromJSON LogLevel
+
+data LogClass
+  = ManagementLogClass
+  | IOLogClass
+  | InterProcessCommunicationLogClass
+  | OtherLogClass
+  deriving (Show, Generic)
+
+instance ToJSON LogClass
+instance FromJSON LogClass
+
+data LogMode
+  = NoLoggingMode
+  | StdOutputLogMode
+  deriving (Show, Generic)
+
+instance ToJSON LogMode
+instance FromJSON LogMode
+
+data Config
+  = Config { loglevel :: LogLevel
+           , logclass :: LogClass
+           , logmode  :: LogMode
+           }
+  deriving (Show, Generic)
+
+instance ToJSON Config
+instance FromJSON Config
+
+
+
+
 
 data SReqInterface
   = SReqInterface { _shutdownSReq :: IO ()
@@ -163,6 +205,8 @@ data SystemInterface
   | SystemInterface { _refactoringProtocol :: RefactoringProtocol
                     , _siSocket :: Socket
                     , _endSocketConnectionNotify :: MVar (IO ())
+                    , _waitForShutdown :: IO ()
+                    , _shutdownSystem :: IO ()
                     , _sreqI :: SReqInterface
                     , _sresI :: SResInterface
                     , _fsI :: FSInterface
@@ -171,7 +215,7 @@ data SystemInterface
                     }
 
 
-type ClientMessageHandler = FSInterface -> (ResponseMsg -> IO ()) -> ClientMessage -> StateT DaemonSessionState Ghc Bool
+type ClientMessageHandler = IO () -> FSInterface -> (ResponseMsg -> IO ()) -> ClientMessage -> StateT DaemonSessionState Ghc Bool
 
 type FileDiff = [(Int, Int, String)]
 

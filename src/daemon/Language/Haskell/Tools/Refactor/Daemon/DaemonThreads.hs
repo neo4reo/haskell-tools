@@ -7,6 +7,7 @@
            , FlexibleContexts
            , TupleSections
            , RecordWildCards
+           , RecursiveDo
            #-}
 module Language.Haskell.Tools.Refactor.Daemon.DaemonThreads where
 
@@ -145,7 +146,7 @@ spawnFS merge = do
 
     return FSInterface { _filePathRegister = writeChan regChan
                        , {-_changedFiles = readMVar cndMVar
-                       , -}_shutdownFS = undefined
+                       , -}_shutdownFS = killThread tid
                        }
 
 -- | spawn communication chanel switch
@@ -156,73 +157,103 @@ spawnMerge si sres = do
     finishMVar <- newMVar False
     rc <- mkRequestContainer
     tid <- forkIO $ forever $ do
-            putStrLn "before getRequests"
+            putStrLn "merge: before getRequests"
             (cls,fps) <- getRequests rc
-            putStrLn $ "after getRequests: " ++ show cls
+            putStrLn $ "merge: after getRequests: " ++ show cls
             let sendMsg  = putMVar reqMsgMVar
                 dropMVar = (>> return ()) . takeMVar
-                loopWhenNotFinished :: IO () -> IO ()
+                loopWhenNotFinished :: (ResponseMsg -> IO ()) -> IO ()
                 loopWhenNotFinished m = do
-                    f <- readMVar finishMVar
-                    if f
-                      then modifyMVarMasked_ finishMVar (\ _ -> return False) >> return ()
-                      else m >> loopWhenNotFinished m
+                    putStrLn "loop: in"
+                    putStrLn "loop: try take a msg from work"
+                    msg <- takeMVar resMsgMVar
+                    putStrLn "loop: receive msg from work"
+                    case msg of
+                        (Just res) -> putStrLn "loop: just" >> m res >> loopWhenNotFinished m
+                        Nothing    -> putStrLn "nothing" >> return ()
+--                    putStrLn $ "loop(-f): f:" ++ show f
+--                    if f
+--                      then (putStrLn "loop(-f): then") >> modifyMVarMasked_ finishMVar (\ _ -> (putStrLn "loop(-f): lock") >> return False) >> return ()
+--                      else (putStrLn "loop(-f): else") >> m >> (putStrLn "loop(-f): rec") >> loopWhenNotFinished m
+                    putStrLn "loop: end"
+            let doNothing _ = return ()
             case (si ^. refactoringProtocol, length fps > 0) of
               (SafeRefactoringProtocol, True)   -> do
+                    putStrLn "merge: safe, fps"
                     sendMsg (ReLoad fps [])
-                    loopWhenNotFinished $ dropMVar resMsgMVar
+                    loopWhenNotFinished $ doNothing -- dropMVar resMsgMVar
               (SafeRefactoringProtocol, False)  -> do
+                    putStrLn "merge: safe, no fps"
+                    putStrLn "merge: send request to work"
                     sendMsg (head cls)
-                    loopWhenNotFinished $ do
-                        res <- takeMVar resMsgMVar
+                    putStrLn "merge: receive responses"
+                    loopWhenNotFinished $ \ res -> do
+                        -- putStrLn "merge: try take a response from work"
+                        -- res <- takeMVar resMsgMVar
+                        putStrLn "merge: receive a message and send it to sres"
                         (sres ^. sockRes) res
               (UnsafeRefactoringProtocol, True) -> do
+                    putStrLn "merge: unsafe, fps"
                     sendMsg (ReLoad fps [])
-                    loopWhenNotFinished $ dropMVar resMsgMVar
-              (UnsafeRefactoringProtocol, True) -> forM_ cls $ \ cl -> do
+                    loopWhenNotFinished $ doNothing -- dropMVar resMsgMVar
+              (UnsafeRefactoringProtocol, False) -> forM_ cls $ \ cl -> do
+                    putStrLn "merge: unsafe, no fps"
                     sendMsg cl
-                    loopWhenNotFinished $ do
-                        res <- takeMVar resMsgMVar
+                    loopWhenNotFinished $ \ res -> do
+                        -- res <- takeMVar resMsgMVar
                         (sres ^. sockRes) res
+            putStrLn "merge: request handling done"
     return MergeInterface { _request = takeMVar reqMsgMVar
-                          , _response = putMVar resMsgMVar
+                          , _response = putMVar resMsgMVar . Just
                           , _newRequest = putRequest rc
-                          , _workFinish = takeMVar finishMVar >> putMVar finishMVar True
+                          , _workFinish = putMVar resMsgMVar Nothing -- modifyMVarMasked_ finishMVar (\ _ -> return True) >> return ()
                           , _newFsChanges = putChangedFiles rc
                           , _shutdownMerge = killThread tid
                           }
 
 
 -- | spawn worker
-spawnWork :: ClientMessageHandler -> Session -> MVar DaemonSessionState -> MergeInterface -> FSInterface -> IO WorkInterface
-spawnWork clh ghcSess daemonState merge fs = do
+spawnWork :: ClientMessageHandler -> IO () -> Session -> MVar DaemonSessionState -> MergeInterface -> FSInterface -> IO WorkInterface
+spawnWork clh shutdown ghcSess daemonState merge fs = do
     exitingMVar <- newMVar False
     tid <- forkIO $ forever $ do
+        putStrLn $ "work: before request"
         msg <- (merge ^. request)
-        exiting <- modifyMVar daemonState (\st -> swap <$> reflectGhc (runStateT (clh fs (merge ^. response) msg) st) ghcSess)
-        putStrLn $ "client message handled, continue: " ++ show exiting
+        putStrLn $ "work: after request"
+        exiting <- modifyMVar daemonState (\st -> swap <$> reflectGhc (runStateT (clh shutdown fs (merge ^. response) msg) st) ghcSess)
+        putStrLn $ "work: client message handled, continue: " ++ show exiting
         modifyMVarMasked_ exitingMVar (\ _ -> return exiting)
         merge ^. workFinish
-        putStrLn $ "work cycle done"
+        putStrLn $ "work: work cycle done"
     return WorkInterface { _shutdownWork = killThread tid
                          , _exitingFlag = readMVar exitingMVar
                          }
 
-buildSystem :: ClientMessageHandler -> Session -> MVar DaemonSessionState -> RefactoringProtocol -> Socket -> IO SystemInterface
-buildSystem clh session daemonState prot sock = do
+buildSystem :: ClientMessageHandler -> (SystemInterface -> IO ()) -> Session -> MVar DaemonSessionState -> RefactoringProtocol -> Socket -> IO SystemInterface
+buildSystem clh shutdown session daemonState prot sock = mdo
+  waitForShutdownMVar <- newEmptyMVar
   si <- mkSystemInterface prot sock
   _sresI <- spawnSRes sock
   _mergeI <- spawnMerge si _sresI
   _sreqI <- spawnSReq si _mergeI
   _fsI <- spawnFS _mergeI
-  _workI <- spawnWork clh session daemonState _mergeI _fsI
+  _workI <- spawnWork clh (shutdown si') session daemonState _mergeI _fsI
 
   let _refactoringProtocol = prot
       _siSocket            = sock
       _endSocketConnectionNotify = si ^. endSocketConnectionNotify
-  return SystemInterface {..}
+      _waitForShutdown     = takeMVar waitForShutdownMVar >> putMVar waitForShutdownMVar ()
+      _shutdownSystem      = void $ forkIO $ do
+          putMVar waitForShutdownMVar ()
+          _shutdownSReq _sreqI
+          _shutdownSRes _sresI
+          _shutdownFS _fsI
+          _shutdownMerge _mergeI
+          _shutdownWork _workI
+  si' <- return SystemInterface {..}
+  return si'
 
-
+{-
 shutdownSystem :: SystemInterface -> IO ()
 shutdownSystem (InitSystem {}) = error "shutdownSystem on InitSystem"
 shutdownSystem si = do putStrLn "shutdownSystem"
@@ -231,3 +262,4 @@ shutdownSystem si = do putStrLn "shutdownSystem"
                                           fromJust $ si ^? (fsI & shutdownFS)
                                           fromJust $ si ^? (mergeI & shutdownMerge)
                                           fromJust $ si ^? (workI & shutdownWork)
+-}

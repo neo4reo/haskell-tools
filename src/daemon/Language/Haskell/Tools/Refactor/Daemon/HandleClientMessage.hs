@@ -67,10 +67,10 @@ import Debug.Trace
 
 -- | This function does the real job of acting upon client messages in a stateful environment of a client
 handleClientMessage :: ClientMessageHandler
-handleClientMessage _ resp KeepAlive = liftIO (resp KeepAliveResponse) >> return True
-handleClientMessage _ resp Disconnect = liftIO (resp Disconnected) >> return False
-handleClientMessage _ _ (SetPackageDB pkgDB) = modify (packageDB .= pkgDB) >> return True
-handleClientMessage fs resp (AddPackages packagePathes) = do
+handleClientMessage _ _ resp KeepAlive = liftIO (resp KeepAliveResponse) >> return True
+handleClientMessage _ _ resp Disconnect = liftIO (resp Disconnected) >> return False
+handleClientMessage _ _ _ (SetPackageDB pkgDB) = modify (packageDB .= pkgDB) >> return True
+handleClientMessage _ fs resp (AddPackages packagePathes) = do
     liftIO $ forM packagePathes $ (fs ^. filePathRegister) . FSRegistration
     existingMCs <- gets (^. refSessMCs)
     let existing = map ms_mod $ (existingMCs ^? traversal & filtered isTheAdded & mcModules & traversal & modRecMS)
@@ -101,7 +101,7 @@ handleClientMessage fs resp (AddPackages packagePathes) = do
             usePackageDB pkgDBLocs
             modify (packageDBSet .= True)
 
-handleClientMessage fs _ (RemovePackages packagePathes) = do
+handleClientMessage _ fs _ (RemovePackages packagePathes) = do
     liftIO $ forM packagePathes $ (fs ^. filePathRegister) . FSUnregistration
     mcs <- gets (^. refSessMCs)
     let existing = map ms_mod (mcs ^? traversal & filtered isRemoved & mcModules & traversal & modRecMS)
@@ -112,7 +112,7 @@ handleClientMessage fs _ (RemovePackages packagePathes) = do
     return True
   where isRemoved mc = (mc ^. mcRoot) `elem` packagePathes
 
-handleClientMessage _ resp (ReLoad changed removed) =
+handleClientMessage _ _ resp (ReLoad changed removed) =
   do removedMods <- gets (map ms_mod . filter ((`elem` removed) . getModSumOrig) . (^? refSessMCs & traversal & mcModules & traversal & modRecMS))
      lift $ forM_ removedMods (\modName -> removeTarget (TargetModule (GHC.moduleName modName)))
      modify $ refSessMCs & traversal & mcModules
@@ -125,10 +125,10 @@ handleClientMessage _ resp (ReLoad changed removed) =
                                 Right _ -> return ()
      return True
 
-handleClientMessage _ _ Stop = do liftIO $ putStrLn "STOP"
-                                  modify (exiting .= True) >> return False
+handleClientMessage shutdown _ _ Stop = do liftIO $ putStrLn "STOP"
+                                           modify (exiting .= True) >> (liftIO shutdown) >> return False
 
-handleClientMessage _ resp (PerformRefactoring refact modPath selection args) = do
+handleClientMessage _ _ resp (PerformRefactoring refact modPath selection args) = do
     (Just actualMod, otherMods) <- getFileMods modPath
     let cmd = analyzeCommand refact (selection:args)
     res <- lift $ performCommand cmd actualMod otherMods

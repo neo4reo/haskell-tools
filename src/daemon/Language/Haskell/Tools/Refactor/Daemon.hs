@@ -87,10 +87,11 @@ runDaemon args = withSocketsDo $
        bind sock (SockAddrInet (read (finalArgs !! 0)) iNADDR_ANY)
        listen sock 1
        si <- clientLoop isSilent sock
-       shutdownSystem si
+       --shutdownSystem si
+       return ()
 
 defaultArgs :: [String]
-defaultArgs = ["4123", "True"]
+defaultArgs = ["4123", "False"]
 
 clientLoop :: Bool -> Socket -> IO SystemInterface
 clientLoop isSilent sock
@@ -98,7 +99,8 @@ clientLoop isSilent sock
        (conn,_) <- accept sock
        ghcSess <- initGhcSession
        state <- newMVar initSession
-       si <- buildSystem handleClientMessage ghcSess state SafeRefactoringProtocol conn
+       si <- buildSystem handleClientMessage _shutdownSystem ghcSess state SafeRefactoringProtocol conn
+       _waitForShutdown si
        sessionData <- readMVar state
        when (not (sessionData ^. exiting))
          $ void $ clientLoop isSilent sock

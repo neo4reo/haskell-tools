@@ -73,21 +73,28 @@ mkRequestContainer = RequestContainer <$> newMVar ([],[]) <*> newEmptyMVar
 
 getRequests :: RequestContainer -> IO ([ClientMessage],[FilePath])
 getRequests (RequestContainer {..}) = do
-    putStrLn "getRequests take lock"
+    putStrLn "getRequests: take content flag"
     takeMVar content_flag
-    putStrLn "getRequests take content"
-    modifyMVarMasked content $ \(cml,fs) -> return (([],[]), (cml,fs))
+    putStrLn "getRequests: take content"
+    a <- modifyMVarMasked content $ \(cml,fs) -> return (([],[]), (cml,fs))
+    putStrLn "getRequests: content release done"
+    return a
+
 
 putRequest :: RequestContainer -> ClientMessage -> IO ()
 putRequest (RequestContainer {..}) cm = do
-    putStrLn "putRequest put content"
-    modifyMVarMasked_ content $ \ (cml, fs) -> do
+    putStrLn "putRequest: put content"
+    a <- modifyMVarMasked_ content $ \ (cml, fs) -> do
       when (null cml && null fs) $ putMVar content_flag ()
       return (cml++[cm], fs)
+    putStrLn "putRequest: content release done"
+    return a
 
 putChangedFiles :: RequestContainer -> [FilePath] -> IO ()
 putChangedFiles (RequestContainer {..}) fs = do
-  putStrLn "putChangedFiles put content"
-  modifyMVarMasked_ content $ \ (cml, fsl) -> do
+  putStrLn "putChangedFiles: put content"
+  a <- modifyMVarMasked_ content $ \ (cml, fsl) -> do
     when (null cml && null fsl) $ putMVar content_flag ()
     return (cml, fsl ++ fs)
+  putStrLn "putChangedFiles: content release done"
+  return a
