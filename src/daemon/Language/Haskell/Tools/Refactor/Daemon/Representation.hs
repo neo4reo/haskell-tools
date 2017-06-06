@@ -81,6 +81,26 @@ data ClientMessage
 
 instance FromJSON ClientMessage
 
+data MsgType
+  = ManagementMsgType
+  | PackageHandleMsgType
+  | RefactorMsgType
+  deriving (Eq, Show, Generic)
+
+msgType :: ClientMessage -> MsgType
+msgType msg = case msg of
+    KeepAlive -> ManagementMsgType
+    SetPackageDB _ -> PackageHandleMsgType
+    AddPackages _ -> PackageHandleMsgType
+    RemovePackages _ -> PackageHandleMsgType
+    PerformRefactoring _ _ _ _ -> RefactorMsgType
+    Stop -> ManagementMsgType
+    Disconnect -> ManagementMsgType
+    ReLoad _ _ -> PackageHandleMsgType
+
+
+-- queue :: [ClientMessage] -> [ClientMessage]
+
 data ResponseMsg
   = KeepAliveResponse
   | ErrorMessage { errorMsg :: String }
@@ -200,11 +220,11 @@ data WorkInterface
 data SystemInterface
   = InitSystem { _refactoringProtocol :: RefactoringProtocol
                , _siSocket :: Socket
-               , _endSocketConnectionNotify :: MVar (IO ())
+               , _endSocketConnectionNotify :: IO () -- MVar (IO ())
                }
   | SystemInterface { _refactoringProtocol :: RefactoringProtocol
                     , _siSocket :: Socket
-                    , _endSocketConnectionNotify :: MVar (IO ())
+                    , _endSocketConnectionNotify :: IO () -- MVar (IO ())
                     , _waitForShutdown :: IO ()
                     , _shutdownSystem :: IO ()
                     , _sreqI :: SReqInterface

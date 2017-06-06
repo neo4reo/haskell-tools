@@ -100,8 +100,11 @@ clientLoop isSilent sock
        ghcSess <- initGhcSession
        state <- newMVar initSession
        si <- buildSystem handleClientMessage _shutdownSystem ghcSess state SafeRefactoringProtocol conn
+       logLn "main: wait for shutdown"
        _waitForShutdown si
+       logLn "main: read state"
        sessionData <- readMVar state
+       logLn "main: when .."
        when (not (sessionData ^. exiting))
          $ void $ clientLoop isSilent sock
        return si
